@@ -161,6 +161,45 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       201,
     );
   });
+  app.post('/conversations/:id/turn', async (c) => {
+    const data = z
+      .object({
+        prompt: z.string().trim().min(1).max(4000),
+        timeoutSeconds: z.number().int().min(10).max(600).default(180),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json(
+        {
+          error:
+            'Send a prompt of 1 to 4,000 characters; timeoutSeconds is 10 to 600.',
+        },
+        400,
+      );
+    if (platform.setup().missing.length)
+      return c.json(
+        { error: `Setup required: ${platform.setup().missing.join(', ')}.` },
+        503,
+      );
+    try {
+      platform.workspace.requireThread(c.req.param('id'));
+    } catch {
+      return c.json(
+        { error: 'Conversation is not owned by this workspace.' },
+        403,
+      );
+    }
+    // One server-side turn for an external binding (another assistant, a
+    // script): the same path voice compute and scheduled turns use.
+    return c.json({
+      text: await platform.turn(
+        c.req.param('id'),
+        data.data.prompt,
+        AbortSignal.timeout(data.data.timeoutSeconds * 1000),
+      ),
+    });
+  });
   app.get('/conversations/:id/capture', (c) =>
     c.json(platform.workspace.capture(c.req.param('id'))),
   );
